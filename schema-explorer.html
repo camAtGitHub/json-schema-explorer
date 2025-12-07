@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JSON / NDJSON Schema Explorer – Final Edition</title>
+<style>
+  :root {
+    --bg: #121212;
+    --text: #e0e0e0;
+    --table-bg: #1e1e1e;
+    --th-bg: #333;
+    --even: #2d2d2d;
+    --border: #444;
+    --breadcrumb-bg: #1e1e1e;
+    --object-bg: #3a3a00;
+    --array-bg: #1b3a1b;
+  }
+  html[data-theme="light"] {
+    --bg: #fafafa;
+    --text: #333;
+    --table-bg: white;
+    --th-bg: #34495e;
+    --even: #f8f9fa;
+    --border: #ddd;
+    --breadcrumb-bg: white;
+    --object-bg: #fffacd;
+    --array-bg: #e8f5e9;
+  }
+
+  * { box-sizing: border-box; }
+  
+  html, body {
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+  }
+  
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, sans-serif;
+    overflow-x: auto;
+    overflow-y: scroll;
+  }
+  
+  #controls {
+    padding: 20px;
+    background: var(--table-bg);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+  }
+  
+  h1 { 
+    margin: 0 0 12px; 
+    color: #3498db; 
+    font-size: 1.5rem; 
+  }
+  
+  textarea {
+    width: 100%;
+    height: 120px;
+    font-family: monospace;
+    font-size: 0.95rem;
+    background: #2a2a2a;
+    color: #e0e0e0;
+    border: 1px solid #555;
+    padding: 8px;
+  }
+  
+  html[data-theme="light"] textarea { 
+    background: white; 
+    color: #333; 
+    border-color: #ccc;
+  }
+  
+  button {
+    padding: 8px 16px;
+    background: #3498db;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1rem;
+    margin-right: 8px;
+  }
+  button:hover { background: #2980b9; }
+  
+  #options {
+    margin-top: 12px;
+    font-size: 0.95rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    align-items: center;
+  }
+  
+  #options input[type="number"] {
+    width: 70px;
+    padding: 4px;
+    background: var(--table-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  
+  #breadcrumb {
+    position: sticky;
+    top: 0;
+    background: var(--breadcrumb-bg);
+    padding: 10px 20px;
+    border-bottom: 2px solid var(--border);
+    z-index: 100;
+    font-size: 1.1rem;
+  }
+  
+  .crumb { 
+    color: #3498db; 
+    cursor: pointer; 
+  }
+  .crumb:hover { 
+    text-decoration: underline; 
+  }
+
+  #table-container {
+    padding: 0 20px 40px;
+    min-height: 70vh;
+    /* NO overflow properties - let body handle all scrolling */
+  }
+  
+  /* Force scrollbars */
+  #table-container::-webkit-scrollbar {
+    width: 16px;
+    height: 16px;
+  }
+  
+  #table-container::-webkit-scrollbar-track {
+    background: var(--bg);
+  }
+  
+  #table-container::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 8px;
+  }
+  
+  #table-container::-webkit-scrollbar-thumb:hover {
+    background: #666;
+  }
+  
+  .json-table {
+    border-collapse: collapse;
+    width: fit-content;
+    min-width: 100%;
+    font-size: 13px;
+    background: var(--table-bg);
+  }
+  
+  .json-table th, .json-table td {
+    border: 1px solid var(--border);
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: top;
+    word-break: break-word;
+    white-space: normal;
+  }
+  
+  .json-table th {
+    background: var(--th-bg);
+    color: white;
+    position: sticky;
+    top: var(--breadcrumb-height, 52px);
+    z-index: 10;
+    font-weight: 600;
+  }
+  
+  /* Frozen row number column */
+  .json-table th:first-child,
+  .json-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 11;
+    background: var(--th-bg);
+    color: white;
+    font-weight: 600;
+    min-width: 60px;
+    width: 60px;
+    text-align: center;
+    box-shadow: 3px 0 6px -2px rgba(0,0,0,0.4);
+  }
+  
+  /* Header corner cell gets highest z-index */
+  .json-table th:first-child {
+    z-index: 12;
+  }
+  
+  html[data-theme="light"] .json-table td:first-child { 
+    background: #f8f9fa;
+    color: #333;
+  }
+  
+  .json-table tr:nth-child(even) td:first-child { 
+    background: var(--even); 
+  }
+  
+  html[data-theme="light"] .json-table tr:nth-child(even) td:first-child { 
+    background: #e9ecef;
+  }
+  
+  .json-table tr:nth-child(even) { 
+    background: var(--even); 
+  }
+  
+  .conflict { 
+    background: #e74c3c !important; 
+  }
+  
+  .conflict-nested {
+    background: repeating-linear-gradient(
+      45deg,
+      #e74c3c,
+      #e74c3c 8px,
+      transparent 8px,
+      transparent 16px
+    ) !important;
+  }
+  
+  html[data-theme="light"] .conflict-nested {
+    background: repeating-linear-gradient(
+      45deg,
+      #e74c3c,
+      #e74c3c 8px,
+      #fff 8px,
+      #fff 16px
+    ) !important;
+  }
+
+  .string  { color: #ff5252; }
+  .number  { color: #4fc3f7; font-weight: bold; }
+  .boolean { color: #42a5f5; font-weight: bold; }
+  .null    { color: #ab47bc; font-weight: bold; }
+  .array   { background: var(--array-bg); }
+  .object  { 
+    background: var(--object-bg); 
+    cursor: pointer; 
+    font-weight: bold; 
+  }
+  .object:hover { 
+    filter: brightness(1.3); 
+  }
+  .missing { 
+    color: #888; 
+    font-style: italic;
+  }
+
+  pre { 
+    margin: 0; 
+    font-family: 'Courier New', monospace; 
+    font-size: inherit; 
+    white-space: pre-wrap; 
+  }
+
+  #fixed-buttons {
+    position: fixed;
+    top: 12px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    gap: 10px;
+  }
+  
+  #fixed-buttons button {
+    width: 44px;
+    height: 44px;
+    font-size: 1.6rem;
+    border-radius: 50%;
+    padding: 0;
+    margin: 0;
+  }
+  
+  #helpBtn { background: #e74c3c; }
+  #themeBtn { background: #555; }
+  
+  dialog {
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    background: var(--table-bg);
+    color: var(--text);
+    max-width: 90vw;
+    padding: 0;
+  }
+  
+  dialog::backdrop {
+    background: rgba(0,0,0,0.7);
+  }
+  
+  dialog h2 {
+    color: #3498db;
+    margin-top: 0;
+  }
+  
+  dialog ul {
+    line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <h1>JSON / NDJSON Schema Explorer – Final Edition</h1>
+  <textarea id="input" placeholder="Paste JSON array or NDJSON here..."></textarea><br><br>
+  <input type="file" id="fileInput" accept=".json,.ndjson,text/*">
+  <button onclick="process()">Load & Explore</button>
+  <button onclick="clearAll()">Clear</button>
+  <div id="options">
+    <label><input type="checkbox" id="fitWidthChk"> Fit to viewport</label>
+    <label>Min width <input id="minCellWidth" type="number" value="120" min="50" step="10"> px</label>
+    <label>Max width <input id="maxCellWidth" type="number" value="600" min="100" step="50"> px</label>
+    <br>
+    <label><input type="checkbox" id="autoScanChk"> Auto-detect nested conflicts</label>
+    <label>Max depth 
+      <select id="scanDepth">
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3" selected>3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+      </select>
+    </label>
+    <span id="scanStatus" style="margin-left:10px; font-size:0.9em; color:#888;"></span>
+  </div>
+</div>
+
+<div id="breadcrumb"><strong>Path:</strong> <span class="crumb" onclick="goToDepth(-1)">Root</span></div>
+
+<div id="table-container"></div>
+
+<div id="fixed-buttons">
+  <button id="themeBtn" title="Toggle theme">🌞</button>
+  <button id="helpBtn" onclick="document.getElementById('helpDialog').showModal()">?</button>
+</div>
+
+<dialog id="helpDialog">
+  <div style="padding:30px; max-width:600px;">
+    <h2>JSON Schema Explorer v6 – Final Edition</h2>
+    <p><strong>Perfect sticky headers · controls scroll away · full data visibility</strong></p>
+    
+    <h3>How to use</h3>
+    <ul>
+      <li>Paste JSON array or NDJSON into textarea OR upload a file</li>
+      <li>Click <strong>Load & Explore</strong> to visualize schema</li>
+      <li>Scroll down → controls disappear, breadcrumb sticks at top</li>
+      <li>Click yellow <span style="background:#3a3a00; padding:2px 6px;">{...}</span> cells to drill down</li>
+      <li>Use breadcrumb navigation to go back up</li>
+      <li><strong>Fit to viewport</strong>: equal column widths, no horizontal scroll</li>
+      <li><strong>Min/Max width</strong>: control column size limits</li>
+    </ul>
+    
+    <h3>Color Legend</h3>
+    <ul>
+      <li><span class="string">strings</span> – red text</li>
+      <li><span class="number">123</span> – blue numbers</li>
+      <li><span class="boolean">true/false</span> – blue booleans</li>
+      <li><span class="null">null</span> – purple</li>
+      <li><span class="object" style="padding:2px 6px;">{...}</span> – yellow background (clickable)</li>
+      <li><span class="array" style="padding:2px 6px;">[...]</span> – green background</li>
+      <li><span class="missing">-</span> – missing key (gray)</li>
+      <li><span style="background:#e74c3c; color:white; padding:2px 6px;">Red header</span> – type conflict in column</li>
+    </ul>
+    
+    <h3>Type Conflicts</h3>
+    <p>A column has a type conflict when the same key contains different data types across records:</p>
+    <ul>
+      <li>Missing keys (absent) do NOT cause conflicts</li>
+      <li>Literal <code>null</code> values DO cause conflicts with other types</li>
+      <li>Empty arrays <code>[]</code>, objects <code>{}</code>, or strings <code>""</code> conflict with different types</li>
+    </ul>
+    
+    <h3>Nested Conflict Detection</h3>
+    <p><strong>Auto-scan</strong> (enabled for &lt;500 records) recursively scans nested objects:</p>
+    <ul>
+      <li><span style="background:#e74c3c; color:white; padding:2px 6px;">Solid red</span> – Conflict at current level</li>
+      <li><span class="conflict-nested" style="padding:2px 6px; color:white;">Diagonal stripes</span> – Conflict exists deeper in tree</li>
+      <li>Hover striped headers to see which nested paths have conflicts</li>
+      <li>Configurable scan depth (1-5 levels)</li>
+    </ul>
+    
+    <button onclick="this.closest('dialog').close()" style="margin-top:20px; padding:10px 20px;">Close</button>
+  </div>
+</dialog>
+
+<script>
+const MAX_RECORDS_FOR_AUTOSCAN = 500;
+const DEFAULT_SCAN_DEPTH = 3;
+
+let allRecords = [];
+let currentPath = [];
+let conflictMap = new Map(); // Maps paths to conflict info: path -> {exists: bool, conflictPaths: []}
+
+const fitChk = document.getElementById('fitWidthChk');
+const minCellWidthInput = document.getElementById('minCellWidth');
+const maxCellWidthInput = document.getElementById('maxCellWidth');
+const autoScanChk = document.getElementById('autoScanChk');
+const scanDepthSelect = document.getElementById('scanDepth');
+const scanStatus = document.getElementById('scanStatus');
+const themeBtn = document.getElementById('themeBtn');
+
+// Theme handling
+const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+let currentTheme = prefersLight ? 'light' : 'dark';
+document.documentElement.dataset.theme = currentTheme;
+themeBtn.innerHTML = currentTheme === 'dark' ? '🌞' : '🌙';
+
+themeBtn.onclick = () => {
+  currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = currentTheme;
+  themeBtn.innerHTML = currentTheme === 'dark' ? '🌞' : '🌙';
+};
+
+function getByPath(obj, path) {
+  let cur = obj;
+  for (const key of path) {
+    if (cur && typeof cur === 'object' && key in cur) {
+      cur = cur[key];
+    } else {
+      return undefined;
+    }
+  }
+  return cur;
+}
+
+function buildConflictMap(records, maxDepth) {
+  const startTime = performance.now();
+  const conflicts = new Map();
+  const allConflictPaths = new Set();
+  const conflictTypeCounts = new Map(); // path -> Map(type -> count)
+  
+  // Unwrap records if they're single-element arrays containing objects
+  const unwrappedRecords = records.map(rec => 
+    Array.isArray(rec) && rec.length === 1 && typeof rec[0] === 'object' 
+      ? rec[0] 
+      : rec
+  );
+  
+  function scanPath(path, values, depth) {
+    if (depth > maxDepth) return;
+    
+    // Check for type conflicts at this path
+    const types = new Set();
+    const typeCounts = new Map();
+    values.forEach(val => {
+      if (val !== undefined) {
+        const type = getType(val);
+        types.add(type);
+        typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+      }
+    });
+    
+    types.delete('missing');
+    const hasConflict = types.size > 1;
+    
+    if (hasConflict) {
+      allConflictPaths.add(path);
+      // Store type counts for this conflict
+      conflictTypeCounts.set(path, typeCounts);
+    }
+    
+    // Recurse into objects
+    const objectValues = values.filter(v => getType(v) === 'object');
+    if (objectValues.length > 0 && depth < maxDepth) {
+      const allKeys = new Set();
+      objectValues.forEach(obj => {
+        if (obj) Object.keys(obj).forEach(k => allKeys.add(k));
+      });
+      
+      allKeys.forEach(key => {
+        const childPath = path ? `${path}.${key}` : key;
+        const childValues = values.map(v => 
+          v && typeof v === 'object' && !Array.isArray(v) ? v[key] : undefined
+        );
+        scanPath(childPath, childValues, depth + 1);
+      });
+    }
+    
+    // Recurse into arrays - scan objects within arrays
+    const arrayValues = values.filter(v => getType(v) === 'array');
+    if (arrayValues.length > 0 && depth < maxDepth) {
+      // Collect all keys that appear in any object within any array
+      const allKeysInArrays = new Set();
+      values.forEach(v => {
+        if (Array.isArray(v)) {
+          v.forEach(item => {
+            if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+              Object.keys(item).forEach(k => allKeysInArrays.add(k));
+            }
+          });
+        }
+      });
+      
+      // For each key, collect all values from all array elements across all records
+      allKeysInArrays.forEach(key => {
+        const childPath = path ? `${path}.${key}` : key;
+        const childValues = [];
+        
+        values.forEach(v => {
+          if (Array.isArray(v)) {
+            v.forEach(item => {
+              if (typeof item === 'object' && item !== null && !Array.isArray(item) && key in item) {
+                childValues.push(item[key]);
+              }
+            });
+          }
+        });
+        
+        if (childValues.length > 0) {
+          scanPath(childPath, childValues, depth + 1);
+        }
+      });
+    }
+  }
+  
+  // Start scanning from root with unwrapped records
+  scanPath('', unwrappedRecords, 0);
+  
+  // Build conflict map with cascading information
+  // For each path, determine if it has conflicts AND/OR nested conflicts
+  allConflictPaths.forEach(conflictPath => {
+    conflicts.set(conflictPath, { 
+      hasDirectConflict: true,
+      nestedConflictPaths: [],
+      typeCounts: conflictTypeCounts.get(conflictPath) || new Map()
+    });
+  });
+  
+  // For each path, find all conflicts that are children of it
+  allConflictPaths.forEach(path => {
+    const parts = path.split('.').filter(p => p);
+    
+    // Build all parent paths
+    for (let i = 0; i < parts.length; i++) {
+      const parentPath = parts.slice(0, i + 1).join('.');
+      
+      if (parentPath !== path) {
+        if (!conflicts.has(parentPath)) {
+          conflicts.set(parentPath, {
+            hasDirectConflict: false,
+            nestedConflictPaths: [],
+            typeCounts: new Map()
+          });
+        }
+        conflicts.get(parentPath).nestedConflictPaths.push(path);
+      }
+    }
+  });
+  
+  const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+  return { conflicts, totalConflicts: allConflictPaths.size, elapsed };
+}
+
+function getType(val) {
+  if (val === undefined) return 'missing';
+  if (val === null) return 'null';
+  if (Array.isArray(val)) return 'array';
+  if (typeof val === 'object') return 'object';
+  return typeof val;
+}
+
+function createCell(val, drillCallback) {
+  const td = document.createElement('td');
+  const type = getType(val);
+
+  td.className = type;
+  td.title = type === 'missing' ? 'Key absent' : JSON.stringify(val ?? null);
+
+  if (type === 'missing') {
+    td.textContent = '-';
+    return td;
+  }
+
+  if (type === 'object' || type === 'array') {
+    const pre = document.createElement('pre');
+    pre.textContent = JSON.stringify(val, null, 2);
+    td.appendChild(pre);
+    if (type === 'object' && drillCallback) {
+      td.onclick = (e) => { 
+        e.stopPropagation(); 
+        drillCallback(); 
+      };
+    }
+  } else {
+    td.textContent = type === 'string' ? val : String(val);
+  }
+  
+  return td;
+}
+
+function applyLayoutMode() {
+  const table = document.querySelector('.json-table');
+  if (!table) return;
+
+  if (fitChk.checked) {
+    table.style.width = '100%';
+    table.style.tableLayout = 'fixed';
+  } else {
+    table.style.width = 'fit-content';
+    table.style.tableLayout = 'auto';
+    table.style.minWidth = '100%';
+  }
+}
+
+function applyCellWidths() {
+  const table = document.querySelector('.json-table');
+  if (!table) return;
+
+  const minW = parseInt(minCellWidthInput.value) || 120;
+  const maxW = parseInt(maxCellWidthInput.value) || 600;
+
+  // Apply to all cells except first column (row numbers)
+  table.querySelectorAll('th:not(:first-child), td:not(:first-child)').forEach(cell => {
+    cell.style.minWidth = minW + 'px';
+    cell.style.maxWidth = maxW + 'px';
+  });
+}
+
+function renderTable() {
+  const breadcrumb = document.getElementById('breadcrumb');
+  breadcrumb.innerHTML = '<strong>Path:</strong> <span class="crumb" onclick="goToDepth(-1)">Root</span>';
+  currentPath.forEach((k, i) => {
+    breadcrumb.innerHTML += ` → <span class="crumb" onclick="goToDepth(${i})">${escapeHtml(k)}</span>`;
+  });
+
+  // Set breadcrumb height for sticky header positioning
+  setTimeout(() => {
+    const height = breadcrumb.offsetHeight;
+    document.documentElement.style.setProperty('--breadcrumb-height', `${height}px`);
+  }, 0);
+
+  const container = document.getElementById('table-container');
+  container.innerHTML = '<table class="json-table"><thead></thead><tbody></tbody></table>';
+  const table = container.querySelector('.json-table');
+  const thead = table.querySelector('thead');
+  const tbody = table.querySelector('tbody');
+
+  const currentValues = allRecords.map(rec => getByPath(rec, currentPath));
+
+  // Collect all unique keys at this level
+  const keySet = new Set();
+  currentValues.forEach(val => {
+    if (val && getType(val) === 'object') {
+      Object.keys(val).forEach(k => keySet.add(k));
+    }
+  });
+  const keys = Array.from(keySet).sort();
+  const hasSubkeys = keys.length > 0;
+
+  // Build header row
+  const hr = document.createElement('tr');
+  const rowTh = document.createElement('th');
+  rowTh.textContent = '#';
+  hr.appendChild(rowTh);
+
+  const columnTypeSets = new Map();
+
+  if (hasSubkeys) {
+    // Multiple columns for object keys
+    keys.forEach(k => {
+      columnTypeSets.set(k, new Set());
+      const th = document.createElement('th');
+      th.textContent = k;
+      hr.appendChild(th);
+    });
+
+    // Analyze types for conflict detection - now with counts
+    const columnTypeCounts = new Map(); // key -> Map(type -> count)
+    keys.forEach(k => columnTypeCounts.set(k, new Map()));
+    
+    allRecords.forEach(rec => {
+      keys.forEach(k => {
+        const v = getByPath(rec, [...currentPath, k]);
+        const type = getType(v);
+        if (v !== undefined) {
+          columnTypeSets.get(k).add(type);
+          // Count occurrences of each type
+          const counts = columnTypeCounts.get(k);
+          counts.set(type, (counts.get(type) || 0) + 1);
+        }
+      });
+    });
+
+    // Mark conflicts (direct or nested) based on conflict map
+    keys.forEach(k => {
+      const types = columnTypeSets.get(k);
+      types.delete('missing');
+      const hasDirectConflict = types.size > 1;
+      
+      // Build full path for this key
+      const fullPath = [...currentPath, k].join('.');
+      const conflictInfo = conflictMap.get(fullPath);
+      
+      const thElement = hr.children[keys.indexOf(k) + 1];
+      
+      if (hasDirectConflict) {
+        // Solid red - conflict at this level
+        thElement.classList.add('conflict');
+        
+        // Add type distribution to header
+        const typeCounts = columnTypeCounts.get(k);
+        const distribution = Array.from(typeCounts.entries())
+          .filter(([type]) => type !== 'missing')
+          .sort((a, b) => b[1] - a[1]) // Sort by count descending
+          .map(([type, count]) => `${type}: ${count}`)
+          .join(' | ');
+        
+        thElement.innerHTML = `${k}<br><small style="font-weight:normal; font-size:0.85em;">[${distribution}]</small>`;
+      } else if (conflictInfo && conflictInfo.nestedConflictPaths.length > 0) {
+        // Striped - conflict exists deeper
+        thElement.classList.add('conflict-nested');
+        
+        // Get type counts from the first nested conflict
+        const firstNestedPath = conflictInfo.nestedConflictPaths[0];
+        const nestedConflictInfo = conflictMap.get(firstNestedPath);
+        
+        if (nestedConflictInfo && nestedConflictInfo.typeCounts.size > 0) {
+          // Show type distribution from nested conflict
+          const distribution = Array.from(nestedConflictInfo.typeCounts.entries())
+            .filter(([type]) => type !== 'missing')
+            .sort((a, b) => b[1] - a[1])
+            .map(([type, count]) => `${type}: ${count}`)
+            .join(' | ');
+          
+          const nestedPathShort = firstNestedPath.replace(fullPath + '.', '');
+          thElement.innerHTML = `${k}<br><small style="font-weight:normal; font-size:0.85em;">[${nestedPathShort}]</small><br><small style="font-weight:normal; font-size:0.8em;">[${distribution}]</small>`;
+        }
+        
+        // Add tooltip
+        const uniquePaths = [...new Set(conflictInfo.nestedConflictPaths)]
+          .map(p => p.replace(fullPath + '.', ''))
+          .slice(0, 5);
+        
+        const tooltip = `⚠️ Nested conflicts detected:\n${uniquePaths.map(p => '  • ' + p).join('\n')}`;
+        thElement.title = tooltip;
+      }
+    });
+  } else {
+    // Single "Value" column for primitive or array values
+    const th = document.createElement('th');
+    th.textContent = 'Value';
+    
+    // Count types for the value column
+    const typeCounts = new Map();
+    currentValues.forEach(v => {
+      if (v !== undefined) {
+        const type = getType(v);
+        typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+      }
+    });
+    
+    const types = new Set(currentValues.filter(v => v !== undefined).map(getType));
+    if (types.size > 1) {
+      th.classList.add('conflict');
+      
+      // Add type distribution
+      const distribution = Array.from(typeCounts.entries())
+        .filter(([type]) => type !== 'missing')
+        .sort((a, b) => b[1] - a[1])
+        .map(([type, count]) => `${type}: ${count}`)
+        .join(' | ');
+      
+      th.innerHTML = `Value<br><small style="font-weight:normal; font-size:0.85em;">[${distribution}]</small>`;
+    }
+    hr.appendChild(th);
+  }
+  thead.appendChild(hr);
+
+  // Build body rows
+  allRecords.forEach((rec, i) => {
+    const tr = document.createElement('tr');
+    const numTd = document.createElement('td');
+    numTd.textContent = i + 1;
+    tr.appendChild(numTd);
+
+    if (hasSubkeys) {
+      keys.forEach(k => {
+        const val = getByPath(rec, [...currentPath, k]);
+        tr.appendChild(createCell(val, () => {
+          currentPath.push(k);
+          renderTable();
+        }));
+      });
+    } else {
+      tr.appendChild(createCell(currentValues[i], null));
+    }
+    tbody.appendChild(tr);
+  });
+
+  // Apply layout settings
+  applyLayoutMode();
+  applyCellWidths();
+}
+
+function goToDepth(depth) {
+  if (depth === -1) {
+    currentPath = [];
+  } else {
+    currentPath = currentPath.slice(0, depth + 1);
+  }
+  renderTable();
+}
+
+function clearAll() {
+  document.getElementById('input').value = '';
+  document.getElementById('fileInput').value = '';
+  allRecords = [];
+  currentPath = [];
+  conflictMap = new Map();
+  scanStatus.textContent = '';
+  document.getElementById('table-container').innerHTML = '';
+  document.getElementById('breadcrumb').innerHTML = '<strong>Path:</strong> <span class="crumb" onclick="goToDepth(-1)">Root</span>';
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+fitChk.onchange = applyLayoutMode;
+minCellWidthInput.oninput = applyCellWidths;
+maxCellWidthInput.oninput = applyCellWidths;
+
+function process() {
+  let text = document.getElementById('input').value.trim();
+  const fileInput = document.getElementById('fileInput');
+
+  if (fileInput.files.length > 0) {
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    reader.onload = e => parseAndRender(e.target.result);
+    reader.readAsText(file);
+    return;
+  }
+
+  if (!text) {
+    alert('Please paste JSON/NDJSON data or upload a file');
+    return;
+  }
+  
+  parseAndRender(text);
+}
+
+function parseAndRender(text) {
+  let records = [];
+  
+  try {
+    // Try as JSON array first
+    if (text.trim().startsWith('[')) {
+      const arr = JSON.parse(text);
+      if (Array.isArray(arr)) {
+        records = arr;
+      }
+    } else {
+      // Try as NDJSON
+      text.split(/\r?\n/).forEach(line => {
+        const trimmed = line.trim();
+        if (trimmed) {
+          records.push(JSON.parse(trimmed));
+        }
+      });
+    }
+  } catch (e) {
+    alert('Invalid JSON/NDJSON format: ' + e.message);
+    return;
+  }
+
+  if (records.length === 0) {
+    alert('No records found in input');
+    return;
+  }
+
+  // Unwrap records if they're single-element arrays containing objects
+  allRecords = records.map(rec => 
+    Array.isArray(rec) && rec.length === 1 && typeof rec[0] === 'object' 
+      ? rec[0] 
+      : rec
+  );
+  currentPath = [];
+  
+  // Auto-scan logic based on record count
+  const shouldAutoScan = records.length < MAX_RECORDS_FOR_AUTOSCAN;
+  autoScanChk.checked = shouldAutoScan;
+  autoScanChk.disabled = false;
+  
+  if (!shouldAutoScan) {
+    scanStatus.textContent = `⚠️ Auto-scan disabled (${records.length} records ≥ ${MAX_RECORDS_FOR_AUTOSCAN})`;
+    scanStatus.style.color = '#ff9800';
+    conflictMap = new Map();
+  } else {
+    // Build conflict map
+    if (autoScanChk.checked) {
+      const maxDepth = parseInt(scanDepthSelect.value);
+      const result = buildConflictMap(records, maxDepth);
+      conflictMap = result.conflicts;
+      
+      scanStatus.textContent = `✓ Scanned ${records.length} records, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
+      scanStatus.style.color = result.totalConflicts > 0 ? '#e74c3c' : '#27ae60';
+    } else {
+      conflictMap = new Map();
+      scanStatus.textContent = '';
+    }
+  }
+  
+  renderTable();
+  
+  // Scroll to breadcrumb to show table
+  setTimeout(() => {
+    document.getElementById('breadcrumb').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 100);
+}
+
+// Re-scan when checkbox or depth changes
+autoScanChk.onchange = () => {
+  if (allRecords.length > 0) {
+    if (autoScanChk.checked) {
+      const maxDepth = parseInt(scanDepthSelect.value);
+      const result = buildConflictMap(allRecords, maxDepth);
+      conflictMap = result.conflicts;
+      
+      scanStatus.textContent = `✓ Scanned ${allRecords.length} records, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
+      scanStatus.style.color = result.totalConflicts > 0 ? '#e74c3c' : '#27ae60';
+    } else {
+      conflictMap = new Map();
+      scanStatus.textContent = '';
+    }
+    renderTable();
+  }
+};
+
+scanDepthSelect.onchange = () => {
+  if (autoScanChk.checked && allRecords.length > 0) {
+    const maxDepth = parseInt(scanDepthSelect.value);
+    const result = buildConflictMap(allRecords, maxDepth);
+    conflictMap = result.conflicts;
+    
+    scanStatus.textContent = `✓ Scanned ${allRecords.length} records, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
+    scanStatus.style.color = result.totalConflicts > 0 ? '#e74c3c' : '#27ae60';
+    renderTable();
+  }
+};
+</script>
+</body>
+</html>
