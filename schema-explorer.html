@@ -563,6 +563,10 @@ function getType(val) {
   return typeof val;
 }
 
+function isPlainObject(val) {
+  return typeof val === 'object' && val !== null && !Array.isArray(val);
+}
+
 function createCell(val, drillCallback, arrayDrillCallback) {
   const td = document.createElement('td');
   const type = getType(val);
@@ -586,7 +590,7 @@ function createCell(val, drillCallback, arrayDrillCallback) {
       };
     } else if (type === 'array' && arrayDrillCallback) {
       // Make all non-empty arrays drillable
-      if (Array.isArray(val) && val.length > 0) {
+      if (val.length > 0) {
         td.style.cursor = 'pointer';
         td.onclick = (e) => { 
           e.stopPropagation(); 
@@ -880,15 +884,13 @@ function renderFlattenedArrayTable(thead, tbody) {
   const { flattenedData, sourceIndices } = arrayFlattenInfo;
   
   // Determine if array contains objects or primitives
-  const hasObjects = flattenedData.some(item => 
-    typeof item === 'object' && item !== null && !Array.isArray(item)
-  );
+  const hasObjects = flattenedData.some(item => isPlainObject(item));
   
   if (hasObjects) {
     // Collect all unique keys from objects
     const keySet = new Set();
     flattenedData.forEach(item => {
-      if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+      if (isPlainObject(item)) {
         Object.keys(item).forEach(k => keySet.add(k));
       }
     });
@@ -927,7 +929,7 @@ function renderFlattenedArrayTable(thead, tbody) {
       tr.appendChild(srcTd);
       
       keys.forEach(k => {
-        const val = (typeof item === 'object' && item !== null && !Array.isArray(item)) ? item[k] : undefined;
+        const val = isPlainObject(item) ? item[k] : undefined;
         // No drill callbacks in flattened view for now
         tr.appendChild(createCell(val, null, null));
       });
