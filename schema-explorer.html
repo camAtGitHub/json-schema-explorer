@@ -96,8 +96,9 @@
     opacity: 0.9;
   }
   #deepScanBtn.scanning {
-    background: #ff9800;
+    background: #ff9800 !important;
     animation: pulse 1.5s infinite;
+    cursor: wait;
   }
   
   #cancelScanBtn {
@@ -1370,7 +1371,7 @@ deepScanBtn.onclick = async () => {
   
   // Update button states
   deepScanBtn.classList.add('scanning');
-  deepScanBtn.disabled = false;
+  deepScanBtn.disabled = true;
   cancelScanBtn.style.display = 'inline-block';
   
   // Progress callback
