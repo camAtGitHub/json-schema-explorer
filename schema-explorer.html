@@ -554,6 +554,7 @@ const FILENAME_TRUNCATE_LENGTH = 12;
 const DROP_ZONE_DEFAULT_ICON = '📁';
 const DROP_ZONE_DEFAULT_TEXT = 'Drop file';
 const DROP_ZONE_DEFAULT_SUBTEXT = 'or click';
+const ERROR_MESSAGE_INVALID_FILE = 'Invalid type';
 
 let allRecords = [];
 let currentPath = [];
@@ -598,7 +599,7 @@ fileInput.addEventListener('change', (e) => {
     const lastDotIndex = fileName.lastIndexOf('.');
     
     if (lastDotIndex === -1) {
-      showDropZoneStatus('error', '❌', 'JSON only', '');
+      showDropZoneStatus('error', '❌', ERROR_MESSAGE_INVALID_FILE, '');
       fileInput.value = ''; // Clear the invalid file
       resetDropZone();
       return;
@@ -608,7 +609,7 @@ fileInput.addEventListener('change', (e) => {
     const isValid = validExtensions.includes(extension);
     
     if (!isValid) {
-      showDropZoneStatus('error', '❌', 'JSON only', '');
+      showDropZoneStatus('error', '❌', ERROR_MESSAGE_INVALID_FILE, '');
       fileInput.value = ''; // Clear the invalid file
       resetDropZone();
       return;
@@ -642,7 +643,7 @@ dropZone.addEventListener('drop', (e) => {
     const lastDotIndex = fileName.lastIndexOf('.');
     
     if (lastDotIndex === -1) {
-      showDropZoneStatus('error', '❌', 'JSON only', '');
+      showDropZoneStatus('error', '❌', ERROR_MESSAGE_INVALID_FILE, '');
       resetDropZone();
       return;
     }
@@ -651,7 +652,7 @@ dropZone.addEventListener('drop', (e) => {
     const isValid = validExtensions.includes(extension);
     
     if (!isValid) {
-      showDropZoneStatus('error', '❌', 'JSON only', '');
+      showDropZoneStatus('error', '❌', ERROR_MESSAGE_INVALID_FILE, '');
       resetDropZone();
       return;
     }
