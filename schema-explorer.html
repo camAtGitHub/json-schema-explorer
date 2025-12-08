@@ -85,6 +85,33 @@
   }
   button:hover { background: #2980b9; }
   
+  #deepScanBtn {
+    background: #ff9800;
+    font-weight: bold;
+  }
+  #deepScanBtn:hover { background: #f57c00; }
+  #deepScanBtn:disabled {
+    background: #4caf50;
+    cursor: not-allowed;
+    opacity: 0.9;
+  }
+  #deepScanBtn.scanning {
+    background: #ff9800 !important;
+    animation: pulse 1.5s infinite;
+    cursor: wait;
+  }
+  
+  #cancelScanBtn {
+    background: #e74c3c;
+    padding: 8px 12px;
+  }
+  #cancelScanBtn:hover { background: #c0392b; }
+  
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+  
   #options {
     margin-top: 12px;
     font-size: 0.95rem;
@@ -322,8 +349,22 @@
         <option value="3" selected>3</option>
         <option value="4">4</option>
         <option value="5">5</option>
+        <option value="unlimited">Unlimited</option>
       </select>
     </label>
+    <label>On drill-down, scan ahead:
+      <select id="drillScanDepth">
+        <option value="0">Off</option>
+        <option value="1">1 level</option>
+        <option value="2">2 levels</option>
+        <option value="3" selected>3 levels</option>
+        <option value="5">5 levels</option>
+        <option value="unlimited">Unlimited</option>
+      </select>
+    </label>
+    <br>
+    <button id="deepScanBtn" style="display:none;">Full Deep Scan</button>
+    <button id="cancelScanBtn" style="display:none;">Cancel</button>
     <span id="scanStatus" style="margin-left:10px; font-size:0.9em; color:#888;"></span>
   </div>
 </div>
@@ -394,14 +435,19 @@ let allRecords = [];
 let currentPath = [];
 let conflictMap = new Map(); // Maps paths to conflict info: path -> {exists: bool, conflictPaths: []}
 let arrayFlattenInfo = null; // Stores info when viewing flattened array: {parentPath, key, sourceIndices}
+let isScanning = false;
+let cancelScan = false;
 
 const fitChk = document.getElementById('fitWidthChk');
 const minCellWidthInput = document.getElementById('minCellWidth');
 const maxCellWidthInput = document.getElementById('maxCellWidth');
 const autoScanChk = document.getElementById('autoScanChk');
 const scanDepthSelect = document.getElementById('scanDepth');
+const drillScanDepthSelect = document.getElementById('drillScanDepth');
 const scanStatus = document.getElementById('scanStatus');
 const themeBtn = document.getElementById('themeBtn');
+const deepScanBtn = document.getElementById('deepScanBtn');
+const cancelScanBtn = document.getElementById('cancelScanBtn');
 
 // Theme handling
 const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
@@ -427,11 +473,13 @@ function getByPath(obj, path) {
   return cur;
 }
 
-function buildConflictMap(records, maxDepth) {
+function buildConflictMap(records, maxDepth, progressCallback = null) {
   const startTime = performance.now();
   const conflicts = new Map();
   const allConflictPaths = new Set();
   const conflictTypeCounts = new Map(); // path -> Map(type -> count)
+  const isUnlimited = maxDepth === Infinity;
+  let currentDepth = 0;
   
   // Unwrap records if they're single-element arrays containing objects
   const unwrappedRecords = records.map(rec => 
@@ -441,7 +489,17 @@ function buildConflictMap(records, maxDepth) {
   );
   
   function scanPath(path, values, depth) {
-    if (depth > maxDepth) return;
+    if (cancelScan) return; // Check for cancellation
+    
+    if (!isUnlimited && depth > maxDepth) return;
+    
+    // Update current depth for progress reporting
+    if (depth > currentDepth) {
+      currentDepth = depth;
+      if (progressCallback) {
+        progressCallback(depth);
+      }
+    }
     
     // Check for type conflicts at this path
     const types = new Set();
@@ -465,13 +523,14 @@ function buildConflictMap(records, maxDepth) {
     
     // Recurse into objects
     const objectValues = values.filter(v => getType(v) === 'object');
-    if (objectValues.length > 0 && depth < maxDepth) {
+    if (objectValues.length > 0 && (isUnlimited || depth < maxDepth)) {
       const allKeys = new Set();
       objectValues.forEach(obj => {
         if (obj) Object.keys(obj).forEach(k => allKeys.add(k));
       });
       
       allKeys.forEach(key => {
+        if (cancelScan) return; // Check for cancellation
         const childPath = path ? `${path}.${key}` : key;
         const childValues = values.map(v => 
           v && typeof v === 'object' && !Array.isArray(v) ? v[key] : undefined
@@ -482,7 +541,7 @@ function buildConflictMap(records, maxDepth) {
     
     // Recurse into arrays - scan objects within arrays
     const arrayValues = values.filter(v => getType(v) === 'array');
-    if (arrayValues.length > 0 && depth < maxDepth) {
+    if (arrayValues.length > 0 && (isUnlimited || depth < maxDepth)) {
       // Collect all keys that appear in any object within any array
       const allKeysInArrays = new Set();
       values.forEach(v => {
@@ -497,6 +556,7 @@ function buildConflictMap(records, maxDepth) {
       
       // For each key, collect all values from all array elements across all records
       allKeysInArrays.forEach(key => {
+        if (cancelScan) return; // Check for cancellation
         const childPath = path ? `${path}.${key}` : key;
         const childValues = [];
         
@@ -553,6 +613,167 @@ function buildConflictMap(records, maxDepth) {
   
   const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
   return { conflicts, totalConflicts: allConflictPaths.size, elapsed };
+}
+
+// Helper function to build conflict map from a set of values at a specific path
+function buildConflictMapFromValues(values, basePath, maxDepth) {
+  const conflicts = new Map();
+  const allConflictPaths = new Set();
+  const conflictTypeCounts = new Map();
+  const isUnlimited = maxDepth === Infinity;
+  
+  function scanPath(path, vals, depth) {
+    if (cancelScan) return;
+    if (!isUnlimited && depth > maxDepth) return;
+    
+    // Check for type conflicts at this path
+    const types = new Set();
+    const typeCounts = new Map();
+    vals.forEach(val => {
+      if (val !== undefined) {
+        const type = getType(val);
+        types.add(type);
+        typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+      }
+    });
+    
+    types.delete('missing');
+    const hasConflict = types.size > 1;
+    
+    if (hasConflict) {
+      allConflictPaths.add(path);
+      conflictTypeCounts.set(path, typeCounts);
+    }
+    
+    // Recurse into objects
+    const objectValues = vals.filter(v => getType(v) === 'object');
+    if (objectValues.length > 0 && (isUnlimited || depth < maxDepth)) {
+      const allKeys = new Set();
+      objectValues.forEach(obj => {
+        if (obj) Object.keys(obj).forEach(k => allKeys.add(k));
+      });
+      
+      allKeys.forEach(key => {
+        if (cancelScan) return;
+        const childPath = path ? `${path}.${key}` : key;
+        const childValues = vals.map(v => 
+          v && typeof v === 'object' && !Array.isArray(v) ? v[key] : undefined
+        );
+        scanPath(childPath, childValues, depth + 1);
+      });
+    }
+    
+    // Recurse into arrays
+    const arrayValues = vals.filter(v => getType(v) === 'array');
+    if (arrayValues.length > 0 && (isUnlimited || depth < maxDepth)) {
+      const allKeysInArrays = new Set();
+      vals.forEach(v => {
+        if (Array.isArray(v)) {
+          v.forEach(item => {
+            if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+              Object.keys(item).forEach(k => allKeysInArrays.add(k));
+            }
+          });
+        }
+      });
+      
+      allKeysInArrays.forEach(key => {
+        if (cancelScan) return;
+        const childPath = path ? `${path}.${key}` : key;
+        const childValues = [];
+        
+        vals.forEach(v => {
+          if (Array.isArray(v)) {
+            v.forEach(item => {
+              if (typeof item === 'object' && item !== null && !Array.isArray(item) && key in item) {
+                childValues.push(item[key]);
+              }
+            });
+          }
+        });
+        
+        if (childValues.length > 0) {
+          scanPath(childPath, childValues, depth + 1);
+        }
+      });
+    }
+  }
+  
+  // Start scanning from the base path
+  scanPath(basePath, values, 0);
+  
+  // Build conflict map
+  allConflictPaths.forEach(conflictPath => {
+    conflicts.set(conflictPath, { 
+      hasDirectConflict: true,
+      nestedConflictPaths: [],
+      typeCounts: conflictTypeCounts.get(conflictPath) || new Map()
+    });
+  });
+  
+  // For each path, find all conflicts that are children of it
+  allConflictPaths.forEach(path => {
+    const parts = path.split('.').filter(p => p);
+    
+    for (let i = 0; i < parts.length; i++) {
+      const parentPath = parts.slice(0, i + 1).join('.');
+      
+      if (parentPath !== path) {
+        let entry = conflicts.get(parentPath);
+        if (!entry) {
+          entry = { hasDirectConflict: false, nestedConflictPaths: [], typeCounts: new Map() };
+          conflicts.set(parentPath, entry);
+        }
+        if (!entry.nestedConflictPaths.includes(path)) {
+          entry.nestedConflictPaths.push(path);
+        }
+      }
+    }
+  });
+  
+  return { conflicts };
+}
+
+function performDrillDownScan() {
+  const drillDepthValue = drillScanDepthSelect.value;
+  
+  // If set to "Off", don't scan
+  if (drillDepthValue === '0') {
+    return;
+  }
+  
+  // Determine the depth to scan
+  let scanDepth;
+  if (drillDepthValue === 'unlimited') {
+    scanDepth = Infinity;
+  } else {
+    scanDepth = parseInt(drillDepthValue, 10);
+  }
+  
+  // Extract values at the current path from all records
+  const pathStr = currentPath.join('.');
+  const valuesAtPath = allRecords.map(rec => getByPath(rec, currentPath));
+  
+  // Build a mini conflict map starting from this branch
+  const result = buildConflictMapFromValues(valuesAtPath, pathStr, scanDepth);
+  
+  if (result) {
+    // Merge the branch scan results into the global conflict map
+    result.conflicts.forEach((value, key) => {
+      conflictMap.set(key, value);
+    });
+    
+    // Update scan status briefly to show drill-down scan happened
+    const prevStatus = scanStatus.innerHTML;
+    scanStatus.innerHTML = `✓ Scanned branch '${pathStr || 'Root'}' to depth ${drillDepthValue === 'unlimited' ? 'unlimited' : scanDepth}`;
+    scanStatus.style.color = '#27ae60';
+    
+    // Revert to previous status after 2 seconds
+    setTimeout(() => {
+      scanStatus.innerHTML = prevStatus;
+      scanStatus.style.color = '';
+    }, 2000);
+  }
 }
 
 function getType(val) {
@@ -825,6 +1046,8 @@ function renderTable() {
         const val = getByPath(rec, [...currentPath, k]);
         tr.appendChild(createCell(val, () => {
           currentPath.push(k);
+          // Drill-down scan logic
+          performDrillDownScan();
           renderTable();
         }, () => {
           // Array drill callback
@@ -1068,6 +1291,17 @@ function parseAndRender(text) {
   autoScanChk.checked = shouldAutoScan;
   autoScanChk.disabled = false;
   
+  // Show/hide deep scan button based on record count
+  if (records.length >= MAX_RECORDS_FOR_AUTOSCAN) {
+    deepScanBtn.style.display = 'inline-block';
+    deepScanBtn.textContent = 'Full Deep Scan';
+    deepScanBtn.disabled = false;
+    deepScanBtn.classList.remove('scanning');
+  } else {
+    deepScanBtn.style.display = 'none';
+  }
+  cancelScanBtn.style.display = 'none';
+  
   if (!shouldAutoScan) {
     scanStatus.textContent = `⚠️ Auto-scan disabled (${records.length} records ≥ ${MAX_RECORDS_FOR_AUTOSCAN})`;
     scanStatus.style.color = '#ff9800';
@@ -1075,11 +1309,12 @@ function parseAndRender(text) {
   } else {
     // Build conflict map
     if (autoScanChk.checked) {
-      const maxDepth = parseInt(scanDepthSelect.value);
+      const maxDepth = scanDepthSelect.value === 'unlimited' ? Infinity : parseInt(scanDepthSelect.value);
       const result = buildConflictMap(records, maxDepth);
       conflictMap = result.conflicts;
       
-      scanStatus.textContent = `✓ Scanned ${records.length} records, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
+      const depthText = maxDepth === Infinity ? '(unlimited depth)' : `to depth ${maxDepth}`;
+      scanStatus.textContent = `✓ Scanned ${records.length} records ${depthText}, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
       scanStatus.style.color = result.totalConflicts > 0 ? '#e74c3c' : '#27ae60';
     } else {
       conflictMap = new Map();
@@ -1099,11 +1334,12 @@ function parseAndRender(text) {
 autoScanChk.onchange = () => {
   if (allRecords.length > 0) {
     if (autoScanChk.checked) {
-      const maxDepth = parseInt(scanDepthSelect.value);
+      const maxDepth = scanDepthSelect.value === 'unlimited' ? Infinity : parseInt(scanDepthSelect.value);
       const result = buildConflictMap(allRecords, maxDepth);
       conflictMap = result.conflicts;
       
-      scanStatus.textContent = `✓ Scanned ${allRecords.length} records, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
+      const depthText = maxDepth === Infinity ? '(unlimited depth)' : `to depth ${maxDepth}`;
+      scanStatus.textContent = `✓ Scanned ${allRecords.length} records ${depthText}, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
       scanStatus.style.color = result.totalConflicts > 0 ? '#e74c3c' : '#27ae60';
     } else {
       conflictMap = new Map();
@@ -1115,15 +1351,84 @@ autoScanChk.onchange = () => {
 
 scanDepthSelect.onchange = () => {
   if (autoScanChk.checked && allRecords.length > 0) {
-    const maxDepth = parseInt(scanDepthSelect.value);
+    const maxDepth = scanDepthSelect.value === 'unlimited' ? Infinity : parseInt(scanDepthSelect.value);
     const result = buildConflictMap(allRecords, maxDepth);
     conflictMap = result.conflicts;
     
-    scanStatus.textContent = `✓ Scanned ${allRecords.length} records, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
+    const depthText = maxDepth === Infinity ? '(unlimited depth)' : `to depth ${maxDepth}`;
+    scanStatus.textContent = `✓ Scanned ${allRecords.length} records ${depthText}, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
     scanStatus.style.color = result.totalConflicts > 0 ? '#e74c3c' : '#27ae60';
     renderTable();
   }
 };
+
+// Deep scan button handler
+deepScanBtn.onclick = async () => {
+  if (isScanning || allRecords.length === 0) return;
+  
+  isScanning = true;
+  cancelScan = false;
+  
+  // Update button states
+  deepScanBtn.classList.add('scanning');
+  deepScanBtn.disabled = true;
+  cancelScanBtn.style.display = 'inline-block';
+  
+  // Progress callback
+  const progressCallback = (depth) => {
+    if (!cancelScan) {
+      deepScanBtn.textContent = `Scanning depth ${depth}...`;
+      scanStatus.textContent = `Scanning depth ${depth}...`;
+      scanStatus.style.color = '#ff9800';
+    }
+  };
+  
+  // Use setTimeout to allow UI to update
+  setTimeout(() => {
+    if (cancelScan) {
+      resetScanButton();
+      return;
+    }
+    
+    const result = buildConflictMap(allRecords, Infinity, progressCallback);
+    
+    if (cancelScan) {
+      scanStatus.textContent = '⚠️ Scan cancelled';
+      scanStatus.style.color = '#ff9800';
+      conflictMap = new Map();
+    } else {
+      conflictMap = result.conflicts;
+      scanStatus.textContent = `✓ Scanned ${allRecords.length} records (unlimited depth), found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
+      scanStatus.style.color = result.totalConflicts > 0 ? '#e74c3c' : '#27ae60';
+      
+      // Update button to show completion
+      deepScanBtn.textContent = '✓ Fully Scanned';
+      deepScanBtn.disabled = true;
+      deepScanBtn.classList.remove('scanning');
+    }
+    
+    cancelScanBtn.style.display = 'none';
+    isScanning = false;
+    renderTable();
+  }, 100);
+};
+
+// Cancel scan button handler
+cancelScanBtn.onclick = () => {
+  cancelScan = true;
+  resetScanButton();
+};
+
+function resetScanButton() {
+  isScanning = false;
+  cancelScan = false;
+  deepScanBtn.textContent = 'Full Deep Scan';
+  deepScanBtn.disabled = false;
+  deepScanBtn.classList.remove('scanning');
+  cancelScanBtn.style.display = 'none';
+  scanStatus.textContent = `⚠️ Auto-scan disabled (${allRecords.length} records ≥ ${MAX_RECORDS_FOR_AUTOSCAN})`;
+  scanStatus.style.color = '#ff9800';
+}
 </script>
 </body>
 </html>
