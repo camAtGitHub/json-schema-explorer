@@ -351,6 +351,16 @@
         <option value="unlimited">Unlimited</option>
       </select>
     </label>
+    <label>On drill-down, scan ahead:
+      <select id="drillScanDepth">
+        <option value="0">Off</option>
+        <option value="1">1 level</option>
+        <option value="2">2 levels</option>
+        <option value="3" selected>3 levels</option>
+        <option value="5">5 levels</option>
+        <option value="unlimited">Unlimited</option>
+      </select>
+    </label>
     <br>
     <button id="deepScanBtn" style="display:none;">Full Deep Scan</button>
     <button id="cancelScanBtn" style="display:none;">Cancel</button>
@@ -432,6 +442,7 @@ const minCellWidthInput = document.getElementById('minCellWidth');
 const maxCellWidthInput = document.getElementById('maxCellWidth');
 const autoScanChk = document.getElementById('autoScanChk');
 const scanDepthSelect = document.getElementById('scanDepth');
+const drillScanDepthSelect = document.getElementById('drillScanDepth');
 const scanStatus = document.getElementById('scanStatus');
 const themeBtn = document.getElementById('themeBtn');
 const deepScanBtn = document.getElementById('deepScanBtn');
@@ -601,6 +612,41 @@ function buildConflictMap(records, maxDepth, progressCallback = null) {
   
   const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
   return { conflicts, totalConflicts: allConflictPaths.size, elapsed };
+}
+
+function performDrillDownScan() {
+  const drillDepthValue = drillScanDepthSelect.value;
+  
+  // If set to "Off", don't scan
+  if (drillDepthValue === '0') {
+    return;
+  }
+  
+  // Determine the depth to scan
+  let scanDepth;
+  if (drillDepthValue === 'unlimited') {
+    scanDepth = Infinity;
+  } else {
+    scanDepth = parseInt(drillDepthValue, 10);
+  }
+  
+  // Perform the scan starting from the current path
+  const pathStr = currentPath.join('.');
+  const result = buildConflictMap(allRecords, scanDepth);
+  
+  if (result) {
+    conflictMap = result.conflicts;
+    // Update scan status briefly to show drill-down scan happened
+    const prevStatus = scanStatus.innerHTML;
+    scanStatus.innerHTML = `✓ Scanned branch '${pathStr || 'Root'}' to depth ${drillDepthValue === 'unlimited' ? 'unlimited' : scanDepth}`;
+    scanStatus.style.color = '#27ae60';
+    
+    // Revert to previous status after 2 seconds
+    setTimeout(() => {
+      scanStatus.innerHTML = prevStatus;
+      scanStatus.style.color = '';
+    }, 2000);
+  }
 }
 
 function getType(val) {
@@ -873,6 +919,8 @@ function renderTable() {
         const val = getByPath(rec, [...currentPath, k]);
         tr.appendChild(createCell(val, () => {
           currentPath.push(k);
+          // Drill-down scan logic
+          performDrillDownScan();
           renderTable();
         }, () => {
           // Array drill callback
