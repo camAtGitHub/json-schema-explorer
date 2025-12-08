@@ -444,7 +444,7 @@
   <h1>JSON / NDJSON Schema Explorer – Final Edition</h1>
   <div id="inputRow">
     <textarea id="input" placeholder="Paste JSON array or NDJSON here..."></textarea>
-    <div id="dropZone" tabindex="0" role="button" aria-label="Drag and drop JSON, NDJSON, or text file or click to browse">
+    <div id="dropZone" tabindex="0" role="button" aria-label="Drag and drop JSON, NDJSON, or text files, or click to browse">
       <div class="icon">📁</div>
       <div class="text">Drop file</div>
       <div class="subtext">or click</div>
@@ -595,9 +595,7 @@ fileInput.addEventListener('change', (e) => {
     const validation = validateFile(file);
     
     if (!validation.valid) {
-      showDropZoneStatus('error', '❌', ERROR_MESSAGE_INVALID_FILE, '');
-      fileInput.value = ''; // Clear the invalid file
-      resetDropZone();
+      handleInvalidFile(true);
       return;
     }
     
@@ -625,8 +623,7 @@ dropZone.addEventListener('drop', (e) => {
     const validation = validateFile(file);
     
     if (!validation.valid) {
-      showDropZoneStatus('error', '❌', ERROR_MESSAGE_INVALID_FILE, '');
-      resetDropZone();
+      handleInvalidFile(false);
       return;
     }
     
@@ -656,23 +653,31 @@ function resetDropZone() {
   }, DROP_ZONE_RESET_DELAY);
 }
 
+function getFileExtension(fileName) {
+  const lastDotIndex = fileName.lastIndexOf('.');
+  if (lastDotIndex === -1) {
+    return null;
+  }
+  return fileName.substring(lastDotIndex);
+}
+
 function truncateFileName(fileName) {
   if (fileName.length <= FILENAME_MAX_LENGTH) {
     return fileName;
   }
   
   // Preserve the file extension
-  const lastDotIndex = fileName.lastIndexOf('.');
-  if (lastDotIndex === -1) {
+  const extension = getFileExtension(fileName);
+  if (!extension) {
     // No extension, just truncate
     return fileName.substring(0, FILENAME_TRUNCATE_LENGTH) + '...';
   }
   
-  const extension = fileName.substring(lastDotIndex);
-  const baseName = fileName.substring(0, lastDotIndex);
+  const baseName = fileName.substring(0, fileName.length - extension.length);
   
   // Calculate how much of the basename we can show
-  const maxBaseLength = Math.max(1, FILENAME_TRUNCATE_LENGTH - extension.length);
+  // Ensure at least 3 characters of basename for readability
+  const maxBaseLength = Math.max(3, FILENAME_TRUNCATE_LENGTH - extension.length);
   
   return baseName.substring(0, maxBaseLength) + '...' + extension;
 }
@@ -680,13 +685,12 @@ function truncateFileName(fileName) {
 function validateFile(file) {
   const validExtensions = ['.json', '.ndjson', '.txt'];
   const fileName = file.name.toLowerCase();
-  const lastDotIndex = fileName.lastIndexOf('.');
+  const extension = getFileExtension(fileName);
   
-  if (lastDotIndex === -1) {
+  if (!extension) {
     return { valid: false, error: 'No extension' };
   }
   
-  const extension = fileName.substring(lastDotIndex);
   const isValid = validExtensions.includes(extension);
   
   if (!isValid) {
@@ -694,6 +698,14 @@ function validateFile(file) {
   }
   
   return { valid: true };
+}
+
+function handleInvalidFile(clearInput = false) {
+  showDropZoneStatus('error', '❌', ERROR_MESSAGE_INVALID_FILE, '');
+  if (clearInput) {
+    fileInput.value = '';
+  }
+  resetDropZone();
 }
 
 function autoProcessFile(fileName) {
