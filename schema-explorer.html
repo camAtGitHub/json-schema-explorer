@@ -393,6 +393,7 @@ const DEFAULT_SCAN_DEPTH = 3;
 let allRecords = [];
 let currentPath = [];
 let conflictMap = new Map(); // Maps paths to conflict info: path -> {exists: bool, conflictPaths: []}
+let arrayFlattenInfo = null; // Stores info when viewing flattened array: {parentPath, key, sourceIndices}
 
 const fitChk = document.getElementById('fitWidthChk');
 const minCellWidthInput = document.getElementById('minCellWidth');
@@ -562,7 +563,11 @@ function getType(val) {
   return typeof val;
 }
 
-function createCell(val, drillCallback) {
+function isPlainObject(val) {
+  return typeof val === 'object' && val !== null && !Array.isArray(val);
+}
+
+function createCell(val, drillCallback, arrayDrillCallback) {
   const td = document.createElement('td');
   const type = getType(val);
 
@@ -583,6 +588,15 @@ function createCell(val, drillCallback) {
         e.stopPropagation(); 
         drillCallback(); 
       };
+    } else if (type === 'array' && arrayDrillCallback) {
+      // Make all non-empty arrays drillable
+      if (val.length > 0) {
+        td.style.cursor = 'pointer';
+        td.onclick = (e) => { 
+          e.stopPropagation(); 
+          arrayDrillCallback(); 
+        };
+      }
     }
   } else {
     td.textContent = type === 'string' ? val : String(val);
@@ -622,9 +636,18 @@ function applyCellWidths() {
 function renderTable() {
   const breadcrumb = document.getElementById('breadcrumb');
   breadcrumb.innerHTML = '<strong>Path:</strong> <span class="crumb" onclick="goToDepth(-1)">Root</span>';
-  currentPath.forEach((k, i) => {
-    breadcrumb.innerHTML += ` → <span class="crumb" onclick="goToDepth(${i})">${escapeHtml(k)}</span>`;
-  });
+  
+  if (arrayFlattenInfo) {
+    // Show breadcrumb with array indication
+    arrayFlattenInfo.parentPath.forEach((k, i) => {
+      breadcrumb.innerHTML += ` → <span class="crumb" onclick="goToDepth(${i})">${escapeHtml(k)}</span>`;
+    });
+    breadcrumb.innerHTML += ` → <span class="crumb" onclick="exitArrayView()">${escapeHtml(arrayFlattenInfo.key)} (array elements)</span>`;
+  } else {
+    currentPath.forEach((k, i) => {
+      breadcrumb.innerHTML += ` → <span class="crumb" onclick="goToDepth(${i})">${escapeHtml(k)}</span>`;
+    });
+  }
 
   // Set breadcrumb height for sticky header positioning
   setTimeout(() => {
@@ -637,6 +660,14 @@ function renderTable() {
   const table = container.querySelector('.json-table');
   const thead = table.querySelector('thead');
   const tbody = table.querySelector('tbody');
+
+  // Handle flattened array view
+  if (arrayFlattenInfo) {
+    renderFlattenedArrayTable(thead, tbody);
+    applyLayoutMode();
+    applyCellWidths();
+    return;
+  }
 
   const currentValues = allRecords.map(rec => getByPath(rec, currentPath));
 
@@ -713,28 +744,41 @@ function renderTable() {
         // Striped - conflict exists deeper
         thElement.classList.add('conflict-nested');
         
-        // Get type counts from the first nested conflict
-        const firstNestedPath = conflictInfo.nestedConflictPaths[0];
-        const nestedConflictInfo = conflictMap.get(firstNestedPath);
+        // Display multiple nested conflicts (max 5)
+        const MAX_DISPLAY_CONFLICTS = 5;
+        const nestedPaths = [...new Set(conflictInfo.nestedConflictPaths)];
+        const displayPaths = nestedPaths.slice(0, MAX_DISPLAY_CONFLICTS);
+        const hasMore = nestedPaths.length > MAX_DISPLAY_CONFLICTS;
         
-        if (nestedConflictInfo && nestedConflictInfo.typeCounts.size > 0) {
-          // Show type distribution from nested conflict
-          const distribution = Array.from(nestedConflictInfo.typeCounts.entries())
-            .filter(([type]) => type !== 'missing')
-            .sort((a, b) => b[1] - a[1])
-            .map(([type, count]) => `${type}: ${count}`)
-            .join(' | ');
+        let headerHTML = `${k}<br>`;
+        
+        // Show all conflict paths (up to MAX_DISPLAY_CONFLICTS)
+        displayPaths.forEach((nestedPath, idx) => {
+          const nestedConflictInfo = conflictMap.get(nestedPath);
+          const nestedPathShort = nestedPath.replace(fullPath + '.', '');
           
-          const nestedPathShort = firstNestedPath.replace(fullPath + '.', '');
-          thElement.innerHTML = `${k}<br><small style="font-weight:normal; font-size:0.85em;">[${nestedPathShort}]</small><br><small style="font-weight:normal; font-size:0.8em;">[${distribution}]</small>`;
+          if (nestedConflictInfo && nestedConflictInfo.typeCounts.size > 0) {
+            const distribution = Array.from(nestedConflictInfo.typeCounts.entries())
+              .filter(([type]) => type !== 'missing')
+              .sort((a, b) => b[1] - a[1])
+              .map(([type, count]) => `${type}: ${count}`)
+              .join(' | ');
+            
+            headerHTML += `<small style="font-weight:normal; font-size:0.75em;">[${nestedPathShort}: ${distribution}]</small>`;
+            if (idx < displayPaths.length - 1 || hasMore) {
+              headerHTML += '<br>';
+            }
+          }
+        });
+        
+        if (hasMore) {
+          headerHTML += `<small style="font-weight:normal; font-size:0.75em; color:#ff9800;">+${nestedPaths.length - MAX_DISPLAY_CONFLICTS} more</small>`;
         }
         
-        // Add tooltip
-        const uniquePaths = [...new Set(conflictInfo.nestedConflictPaths)]
-          .map(p => p.replace(fullPath + '.', ''))
-          .slice(0, 5);
+        thElement.innerHTML = headerHTML;
         
-        const tooltip = `⚠️ Nested conflicts detected:\n${uniquePaths.map(p => '  • ' + p).join('\n')}`;
+        // Add tooltip showing all conflicts
+        const tooltip = `⚠️ Nested conflicts detected:\n${nestedPaths.map(p => '  • ' + p.replace(fullPath + '.', '')).join('\n')}`;
         thElement.title = tooltip;
       }
     });
@@ -782,10 +826,13 @@ function renderTable() {
         tr.appendChild(createCell(val, () => {
           currentPath.push(k);
           renderTable();
+        }, () => {
+          // Array drill callback
+          enterArrayView(k, i);
         }));
       });
     } else {
-      tr.appendChild(createCell(currentValues[i], null));
+      tr.appendChild(createCell(currentValues[i], null, null));
     }
     tbody.appendChild(tr);
   });
@@ -795,7 +842,140 @@ function renderTable() {
   applyCellWidths();
 }
 
+function enterArrayView(key, recordIndex) {
+  // Flatten all array elements across all records for this key
+  const arrayPath = [...currentPath, key];
+  
+  // Collect all array values and track source indices
+  const flattenedData = [];
+  const sourceIndices = [];
+  
+  allRecords.forEach((rec, recIdx) => {
+    const arrayVal = getByPath(rec, arrayPath);
+    if (Array.isArray(arrayVal)) {
+      arrayVal.forEach((item, itemIdx) => {
+        flattenedData.push(item);
+        sourceIndices.push({ recordIndex: recIdx, arrayIndex: itemIdx });
+      });
+    }
+  });
+  
+  if (flattenedData.length === 0) {
+    return; // Nothing to show
+  }
+  
+  // Store array flatten info
+  arrayFlattenInfo = {
+    parentPath: [...currentPath],
+    key: key,
+    flattenedData: flattenedData,
+    sourceIndices: sourceIndices
+  };
+  
+  renderTable();
+}
+
+function exitArrayView() {
+  arrayFlattenInfo = null;
+  renderTable();
+}
+
+function renderFlattenedArrayTable(thead, tbody) {
+  const { flattenedData, sourceIndices } = arrayFlattenInfo;
+  
+  // Determine if array contains objects or primitives
+  const hasObjects = flattenedData.some(item => isPlainObject(item));
+  
+  if (hasObjects) {
+    // Collect all unique keys from objects
+    const keySet = new Set();
+    flattenedData.forEach(item => {
+      if (isPlainObject(item)) {
+        Object.keys(item).forEach(k => keySet.add(k));
+      }
+    });
+    const keys = Array.from(keySet).sort();
+    
+    // Build header row
+    const hr = document.createElement('tr');
+    const rowTh = document.createElement('th');
+    rowTh.textContent = '#';
+    hr.appendChild(rowTh);
+    
+    const srcTh = document.createElement('th');
+    srcTh.textContent = 'Source';
+    srcTh.title = 'Original record and array index';
+    hr.appendChild(srcTh);
+    
+    keys.forEach(k => {
+      const th = document.createElement('th');
+      th.textContent = k;
+      hr.appendChild(th);
+    });
+    thead.appendChild(hr);
+    
+    // Build body rows
+    flattenedData.forEach((item, i) => {
+      const tr = document.createElement('tr');
+      
+      const numTd = document.createElement('td');
+      numTd.textContent = i + 1;
+      tr.appendChild(numTd);
+      
+      const srcTd = document.createElement('td');
+      const src = sourceIndices[i];
+      srcTd.textContent = `R${src.recordIndex + 1}[${src.arrayIndex}]`;
+      srcTd.title = `From record ${src.recordIndex + 1}, array index ${src.arrayIndex}`;
+      tr.appendChild(srcTd);
+      
+      keys.forEach(k => {
+        const val = isPlainObject(item) ? item[k] : undefined;
+        // No drill callbacks in flattened view for now
+        tr.appendChild(createCell(val, null, null));
+      });
+      
+      tbody.appendChild(tr);
+    });
+  } else {
+    // Array contains primitives - single "Value" column
+    const hr = document.createElement('tr');
+    const rowTh = document.createElement('th');
+    rowTh.textContent = '#';
+    hr.appendChild(rowTh);
+    
+    const srcTh = document.createElement('th');
+    srcTh.textContent = 'Source';
+    srcTh.title = 'Original record and array index';
+    hr.appendChild(srcTh);
+    
+    const valTh = document.createElement('th');
+    valTh.textContent = 'Value';
+    hr.appendChild(valTh);
+    thead.appendChild(hr);
+    
+    // Build body rows
+    flattenedData.forEach((item, i) => {
+      const tr = document.createElement('tr');
+      
+      const numTd = document.createElement('td');
+      numTd.textContent = i + 1;
+      tr.appendChild(numTd);
+      
+      const srcTd = document.createElement('td');
+      const src = sourceIndices[i];
+      srcTd.textContent = `R${src.recordIndex + 1}[${src.arrayIndex}]`;
+      srcTd.title = `From record ${src.recordIndex + 1}, array index ${src.arrayIndex}`;
+      tr.appendChild(srcTd);
+      
+      tr.appendChild(createCell(item, null, null));
+      
+      tbody.appendChild(tr);
+    });
+  }
+}
+
 function goToDepth(depth) {
+  arrayFlattenInfo = null; // Exit array view when navigating
   if (depth === -1) {
     currentPath = [];
   } else {
@@ -810,6 +990,7 @@ function clearAll() {
   allRecords = [];
   currentPath = [];
   conflictMap = new Map();
+  arrayFlattenInfo = null;
   scanStatus.textContent = '';
   document.getElementById('table-container').innerHTML = '';
   document.getElementById('breadcrumb').innerHTML = '<strong>Path:</strong> <span class="crumb" onclick="goToDepth(-1)">Root</span>';
