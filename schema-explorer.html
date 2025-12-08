@@ -547,6 +547,13 @@
 <script>
 const MAX_RECORDS_FOR_AUTOSCAN = 500;
 const DEFAULT_SCAN_DEPTH = 3;
+const AUTO_PROCESS_DELAY = 500;
+const DROP_ZONE_RESET_DELAY = 3000;
+const FILENAME_MAX_LENGTH = 15;
+const FILENAME_TRUNCATE_LENGTH = 12;
+const DROP_ZONE_DEFAULT_ICON = '📁';
+const DROP_ZONE_DEFAULT_TEXT = 'Drop file';
+const DROP_ZONE_DEFAULT_SUBTEXT = 'or click';
 
 let allRecords = [];
 let currentPath = [];
@@ -584,15 +591,7 @@ dropZone.addEventListener('keydown', (e) => {
 fileInput.addEventListener('change', (e) => {
   if (fileInput.files.length > 0) {
     const file = fileInput.files[0];
-    
-    // Show success state briefly
-    showDropZoneStatus('success', '✓', file.name.length > 15 ? file.name.substring(0, 12) + '...' : file.name, '');
-    
-    // Auto-process the file
-    setTimeout(() => {
-      process();
-      resetDropZone();
-    }, 500);
+    autoProcessFile(file.name);
   }
 });
 
@@ -629,14 +628,8 @@ dropZone.addEventListener('drop', (e) => {
     dataTransfer.items.add(file);
     fileInput.files = dataTransfer.files;
     
-    // Show success state briefly
-    showDropZoneStatus('success', '✓', file.name.length > 15 ? file.name.substring(0, 12) + '...' : file.name, '');
-    
     // Auto-process the file
-    setTimeout(() => {
-      process();
-      resetDropZone();
-    }, 500);
+    autoProcessFile(file.name);
   }
 });
 
@@ -650,10 +643,24 @@ function showDropZoneStatus(type, icon, text, subtext) {
 function resetDropZone() {
   setTimeout(() => {
     dropZone.className = '';
-    dropZone.querySelector('.icon').textContent = '📁';
-    dropZone.querySelector('.text').textContent = 'Drop file';
-    dropZone.querySelector('.subtext').textContent = 'or click';
-  }, 3000);
+    dropZone.querySelector('.icon').textContent = DROP_ZONE_DEFAULT_ICON;
+    dropZone.querySelector('.text').textContent = DROP_ZONE_DEFAULT_TEXT;
+    dropZone.querySelector('.subtext').textContent = DROP_ZONE_DEFAULT_SUBTEXT;
+  }, DROP_ZONE_RESET_DELAY);
+}
+
+function truncateFileName(fileName) {
+  return fileName.length > FILENAME_MAX_LENGTH 
+    ? fileName.substring(0, FILENAME_TRUNCATE_LENGTH) + '...' 
+    : fileName;
+}
+
+function autoProcessFile(fileName) {
+  showDropZoneStatus('success', '✓', truncateFileName(fileName), '');
+  setTimeout(() => {
+    process();
+    resetDropZone();
+  }, AUTO_PROCESS_DELAY);
 }
 
 // Theme handling
