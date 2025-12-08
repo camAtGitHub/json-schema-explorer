@@ -591,6 +591,29 @@ dropZone.addEventListener('keydown', (e) => {
 fileInput.addEventListener('change', (e) => {
   if (fileInput.files.length > 0) {
     const file = fileInput.files[0];
+    
+    // Validate file type - same validation as drop handler
+    const validExtensions = ['.json', '.ndjson', '.txt'];
+    const fileName = file.name.toLowerCase();
+    const lastDotIndex = fileName.lastIndexOf('.');
+    
+    if (lastDotIndex === -1) {
+      showDropZoneStatus('error', '❌', 'JSON only', '');
+      fileInput.value = ''; // Clear the invalid file
+      resetDropZone();
+      return;
+    }
+    
+    const extension = fileName.substring(lastDotIndex);
+    const isValid = validExtensions.includes(extension);
+    
+    if (!isValid) {
+      showDropZoneStatus('error', '❌', 'JSON only', '');
+      fileInput.value = ''; // Clear the invalid file
+      resetDropZone();
+      return;
+    }
+    
     autoProcessFile(file.name);
   }
 });
@@ -616,7 +639,15 @@ dropZone.addEventListener('drop', (e) => {
     // Validate file type - check the actual extension
     const validExtensions = ['.json', '.ndjson', '.txt'];
     const fileName = file.name.toLowerCase();
-    const extension = '.' + fileName.split('.').pop();
+    const lastDotIndex = fileName.lastIndexOf('.');
+    
+    if (lastDotIndex === -1) {
+      showDropZoneStatus('error', '❌', 'JSON only', '');
+      resetDropZone();
+      return;
+    }
+    
+    const extension = fileName.substring(lastDotIndex);
     const isValid = validExtensions.includes(extension);
     
     if (!isValid) {
@@ -652,9 +683,28 @@ function resetDropZone() {
 }
 
 function truncateFileName(fileName) {
-  return fileName.length > FILENAME_MAX_LENGTH 
-    ? fileName.substring(0, FILENAME_TRUNCATE_LENGTH) + '...' 
-    : fileName;
+  if (fileName.length <= FILENAME_MAX_LENGTH) {
+    return fileName;
+  }
+  
+  // Preserve the file extension
+  const lastDotIndex = fileName.lastIndexOf('.');
+  if (lastDotIndex === -1) {
+    // No extension, just truncate
+    return fileName.substring(0, FILENAME_TRUNCATE_LENGTH) + '...';
+  }
+  
+  const extension = fileName.substring(lastDotIndex);
+  const baseName = fileName.substring(0, lastDotIndex);
+  
+  // Calculate how much of the basename we can show
+  const maxBaseLength = FILENAME_TRUNCATE_LENGTH - extension.length;
+  if (maxBaseLength <= 0) {
+    // Extension is too long, just show it
+    return '...' + extension;
+  }
+  
+  return baseName.substring(0, maxBaseLength) + '...' + extension;
 }
 
 function autoProcessFile(fileName) {
