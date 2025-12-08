@@ -444,7 +444,7 @@
   <h1>JSON / NDJSON Schema Explorer – Final Edition</h1>
   <div id="inputRow">
     <textarea id="input" placeholder="Paste JSON array or NDJSON here..."></textarea>
-    <div id="dropZone" tabindex="0" role="button" aria-label="Drag and drop JSON file or click to browse">
+    <div id="dropZone" tabindex="0" role="button" aria-label="Drag and drop JSON, NDJSON, or text file or click to browse">
       <div class="icon">📁</div>
       <div class="text">Drop file</div>
       <div class="subtext">or click</div>
@@ -613,13 +613,15 @@ dropZone.addEventListener('drop', (e) => {
   if (files.length > 0) {
     const file = files[0];
     
-    // Validate file type
+    // Validate file type - check the actual extension
     const validExtensions = ['.json', '.ndjson', '.txt'];
     const fileName = file.name.toLowerCase();
-    const isValid = validExtensions.some(ext => fileName.endsWith(ext));
+    const extension = '.' + fileName.split('.').pop();
+    const isValid = validExtensions.includes(extension);
     
     if (!isValid) {
       showDropZoneStatus('error', '❌', 'JSON only', '');
+      resetDropZone();
       return;
     }
     
