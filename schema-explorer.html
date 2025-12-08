@@ -85,6 +85,32 @@
   }
   button:hover { background: #2980b9; }
   
+  #deepScanBtn {
+    background: #ff9800;
+    font-weight: bold;
+  }
+  #deepScanBtn:hover { background: #f57c00; }
+  #deepScanBtn:disabled {
+    background: #4caf50;
+    cursor: not-allowed;
+    opacity: 0.9;
+  }
+  #deepScanBtn.scanning {
+    background: #ff9800;
+    animation: pulse 1.5s infinite;
+  }
+  
+  #cancelScanBtn {
+    background: #e74c3c;
+    padding: 8px 12px;
+  }
+  #cancelScanBtn:hover { background: #c0392b; }
+  
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+  
   #options {
     margin-top: 12px;
     font-size: 0.95rem;
@@ -325,6 +351,9 @@
         <option value="unlimited">Unlimited</option>
       </select>
     </label>
+    <br>
+    <button id="deepScanBtn" style="display:none;">Full Deep Scan</button>
+    <button id="cancelScanBtn" style="display:none;">Cancel</button>
     <span id="scanStatus" style="margin-left:10px; font-size:0.9em; color:#888;"></span>
   </div>
 </div>
@@ -395,6 +424,8 @@ let allRecords = [];
 let currentPath = [];
 let conflictMap = new Map(); // Maps paths to conflict info: path -> {exists: bool, conflictPaths: []}
 let arrayFlattenInfo = null; // Stores info when viewing flattened array: {parentPath, key, sourceIndices}
+let isScanning = false;
+let cancelScan = false;
 
 const fitChk = document.getElementById('fitWidthChk');
 const minCellWidthInput = document.getElementById('minCellWidth');
@@ -403,6 +434,8 @@ const autoScanChk = document.getElementById('autoScanChk');
 const scanDepthSelect = document.getElementById('scanDepth');
 const scanStatus = document.getElementById('scanStatus');
 const themeBtn = document.getElementById('themeBtn');
+const deepScanBtn = document.getElementById('deepScanBtn');
+const cancelScanBtn = document.getElementById('cancelScanBtn');
 
 // Theme handling
 const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
@@ -428,12 +461,13 @@ function getByPath(obj, path) {
   return cur;
 }
 
-function buildConflictMap(records, maxDepth) {
+function buildConflictMap(records, maxDepth, progressCallback = null) {
   const startTime = performance.now();
   const conflicts = new Map();
   const allConflictPaths = new Set();
   const conflictTypeCounts = new Map(); // path -> Map(type -> count)
   const isUnlimited = maxDepth === Infinity;
+  let currentDepth = 0;
   
   // Unwrap records if they're single-element arrays containing objects
   const unwrappedRecords = records.map(rec => 
@@ -443,7 +477,17 @@ function buildConflictMap(records, maxDepth) {
   );
   
   function scanPath(path, values, depth) {
+    if (cancelScan) return; // Check for cancellation
+    
     if (!isUnlimited && depth > maxDepth) return;
+    
+    // Update current depth for progress reporting
+    if (depth > currentDepth) {
+      currentDepth = depth;
+      if (progressCallback) {
+        progressCallback(depth);
+      }
+    }
     
     // Check for type conflicts at this path
     const types = new Set();
@@ -474,6 +518,7 @@ function buildConflictMap(records, maxDepth) {
       });
       
       allKeys.forEach(key => {
+        if (cancelScan) return; // Check for cancellation
         const childPath = path ? `${path}.${key}` : key;
         const childValues = values.map(v => 
           v && typeof v === 'object' && !Array.isArray(v) ? v[key] : undefined
@@ -499,6 +544,7 @@ function buildConflictMap(records, maxDepth) {
       
       // For each key, collect all values from all array elements across all records
       allKeysInArrays.forEach(key => {
+        if (cancelScan) return; // Check for cancellation
         const childPath = path ? `${path}.${key}` : key;
         const childValues = [];
         
@@ -1070,6 +1116,17 @@ function parseAndRender(text) {
   autoScanChk.checked = shouldAutoScan;
   autoScanChk.disabled = false;
   
+  // Show/hide deep scan button based on record count
+  if (records.length >= MAX_RECORDS_FOR_AUTOSCAN) {
+    deepScanBtn.style.display = 'inline-block';
+    deepScanBtn.textContent = 'Full Deep Scan';
+    deepScanBtn.disabled = false;
+    deepScanBtn.classList.remove('scanning');
+  } else {
+    deepScanBtn.style.display = 'none';
+  }
+  cancelScanBtn.style.display = 'none';
+  
   if (!shouldAutoScan) {
     scanStatus.textContent = `⚠️ Auto-scan disabled (${records.length} records ≥ ${MAX_RECORDS_FOR_AUTOSCAN})`;
     scanStatus.style.color = '#ff9800';
@@ -1129,6 +1186,74 @@ scanDepthSelect.onchange = () => {
     renderTable();
   }
 };
+
+// Deep scan button handler
+deepScanBtn.onclick = async () => {
+  if (isScanning || allRecords.length === 0) return;
+  
+  isScanning = true;
+  cancelScan = false;
+  
+  // Update button states
+  deepScanBtn.classList.add('scanning');
+  deepScanBtn.disabled = false;
+  cancelScanBtn.style.display = 'inline-block';
+  
+  // Progress callback
+  const progressCallback = (depth) => {
+    if (!cancelScan) {
+      deepScanBtn.textContent = `Scanning depth ${depth}...`;
+      scanStatus.textContent = `Scanning depth ${depth}...`;
+      scanStatus.style.color = '#ff9800';
+    }
+  };
+  
+  // Use setTimeout to allow UI to update
+  setTimeout(() => {
+    if (cancelScan) {
+      resetScanButton();
+      return;
+    }
+    
+    const result = buildConflictMap(allRecords, Infinity, progressCallback);
+    
+    if (cancelScan) {
+      scanStatus.textContent = '⚠️ Scan cancelled';
+      scanStatus.style.color = '#ff9800';
+      conflictMap = new Map();
+    } else {
+      conflictMap = result.conflicts;
+      scanStatus.textContent = `✓ Scanned ${allRecords.length} records (unlimited depth), found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
+      scanStatus.style.color = result.totalConflicts > 0 ? '#e74c3c' : '#27ae60';
+      
+      // Update button to show completion
+      deepScanBtn.textContent = '✓ Fully Scanned';
+      deepScanBtn.disabled = true;
+      deepScanBtn.classList.remove('scanning');
+    }
+    
+    cancelScanBtn.style.display = 'none';
+    isScanning = false;
+    renderTable();
+  }, 100);
+};
+
+// Cancel scan button handler
+cancelScanBtn.onclick = () => {
+  cancelScan = true;
+  resetScanButton();
+};
+
+function resetScanButton() {
+  isScanning = false;
+  cancelScan = false;
+  deepScanBtn.textContent = 'Full Deep Scan';
+  deepScanBtn.disabled = false;
+  deepScanBtn.classList.remove('scanning');
+  cancelScanBtn.style.display = 'none';
+  scanStatus.textContent = `⚠️ Auto-scan disabled (${allRecords.length} records ≥ ${MAX_RECORDS_FOR_AUTOSCAN})`;
+  scanStatus.style.color = '#ff9800';
+}
 </script>
 </body>
 </html>
