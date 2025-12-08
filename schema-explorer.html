@@ -614,6 +614,125 @@ function buildConflictMap(records, maxDepth, progressCallback = null) {
   return { conflicts, totalConflicts: allConflictPaths.size, elapsed };
 }
 
+// Helper function to build conflict map from a set of values at a specific path
+function buildConflictMapFromValues(values, basePath, maxDepth) {
+  const conflicts = new Map();
+  const allConflictPaths = new Set();
+  const conflictTypeCounts = new Map();
+  const isUnlimited = maxDepth === Infinity;
+  
+  function scanPath(path, vals, depth) {
+    if (cancelScan) return;
+    if (!isUnlimited && depth > maxDepth) return;
+    
+    // Check for type conflicts at this path
+    const types = new Set();
+    const typeCounts = new Map();
+    vals.forEach(val => {
+      if (val !== undefined) {
+        const type = getType(val);
+        types.add(type);
+        typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+      }
+    });
+    
+    types.delete('missing');
+    const hasConflict = types.size > 1;
+    
+    if (hasConflict) {
+      allConflictPaths.add(path);
+      conflictTypeCounts.set(path, typeCounts);
+    }
+    
+    // Recurse into objects
+    const objectValues = vals.filter(v => getType(v) === 'object');
+    if (objectValues.length > 0 && (isUnlimited || depth < maxDepth)) {
+      const allKeys = new Set();
+      objectValues.forEach(obj => {
+        if (obj) Object.keys(obj).forEach(k => allKeys.add(k));
+      });
+      
+      allKeys.forEach(key => {
+        if (cancelScan) return;
+        const childPath = path ? `${path}.${key}` : key;
+        const childValues = vals.map(v => 
+          v && typeof v === 'object' && !Array.isArray(v) ? v[key] : undefined
+        );
+        scanPath(childPath, childValues, depth + 1);
+      });
+    }
+    
+    // Recurse into arrays
+    const arrayValues = vals.filter(v => getType(v) === 'array');
+    if (arrayValues.length > 0 && (isUnlimited || depth < maxDepth)) {
+      const allKeysInArrays = new Set();
+      vals.forEach(v => {
+        if (Array.isArray(v)) {
+          v.forEach(item => {
+            if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+              Object.keys(item).forEach(k => allKeysInArrays.add(k));
+            }
+          });
+        }
+      });
+      
+      allKeysInArrays.forEach(key => {
+        if (cancelScan) return;
+        const childPath = path ? `${path}.${key}` : key;
+        const childValues = [];
+        
+        vals.forEach(v => {
+          if (Array.isArray(v)) {
+            v.forEach(item => {
+              if (typeof item === 'object' && item !== null && !Array.isArray(item) && key in item) {
+                childValues.push(item[key]);
+              }
+            });
+          }
+        });
+        
+        if (childValues.length > 0) {
+          scanPath(childPath, childValues, depth + 1);
+        }
+      });
+    }
+  }
+  
+  // Start scanning from the base path
+  scanPath(basePath, values, 0);
+  
+  // Build conflict map
+  allConflictPaths.forEach(conflictPath => {
+    conflicts.set(conflictPath, { 
+      hasDirectConflict: true,
+      nestedConflictPaths: [],
+      typeCounts: conflictTypeCounts.get(conflictPath) || new Map()
+    });
+  });
+  
+  // For each path, find all conflicts that are children of it
+  allConflictPaths.forEach(path => {
+    const parts = path.split('.').filter(p => p);
+    
+    for (let i = 0; i < parts.length; i++) {
+      const parentPath = parts.slice(0, i + 1).join('.');
+      
+      if (parentPath !== path) {
+        let entry = conflicts.get(parentPath);
+        if (!entry) {
+          entry = { hasDirectConflict: false, nestedConflictPaths: [], typeCounts: new Map() };
+          conflicts.set(parentPath, entry);
+        }
+        if (!entry.nestedConflictPaths.includes(path)) {
+          entry.nestedConflictPaths.push(path);
+        }
+      }
+    }
+  });
+  
+  return { conflicts };
+}
+
 function performDrillDownScan() {
   const drillDepthValue = drillScanDepthSelect.value;
   
@@ -630,12 +749,19 @@ function performDrillDownScan() {
     scanDepth = parseInt(drillDepthValue, 10);
   }
   
-  // Perform the scan starting from the current path
+  // Extract values at the current path from all records
   const pathStr = currentPath.join('.');
-  const result = buildConflictMap(allRecords, scanDepth);
+  const valuesAtPath = allRecords.map(rec => getByPath(rec, currentPath));
+  
+  // Build a mini conflict map starting from this branch
+  const result = buildConflictMapFromValues(valuesAtPath, pathStr, scanDepth);
   
   if (result) {
-    conflictMap = result.conflicts;
+    // Merge the branch scan results into the global conflict map
+    result.conflicts.forEach((value, key) => {
+      conflictMap.set(key, value);
+    });
+    
     // Update scan status briefly to show drill-down scan happened
     const prevStatus = scanStatus.innerHTML;
     scanStatus.innerHTML = `✓ Scanned branch '${pathStr || 'Root'}' to depth ${drillDepthValue === 'unlimited' ? 'unlimited' : scanDepth}`;
