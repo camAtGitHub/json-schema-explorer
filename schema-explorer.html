@@ -322,6 +322,7 @@
         <option value="3" selected>3</option>
         <option value="4">4</option>
         <option value="5">5</option>
+        <option value="unlimited">Unlimited</option>
       </select>
     </label>
     <span id="scanStatus" style="margin-left:10px; font-size:0.9em; color:#888;"></span>
@@ -432,6 +433,7 @@ function buildConflictMap(records, maxDepth) {
   const conflicts = new Map();
   const allConflictPaths = new Set();
   const conflictTypeCounts = new Map(); // path -> Map(type -> count)
+  const isUnlimited = maxDepth === Infinity;
   
   // Unwrap records if they're single-element arrays containing objects
   const unwrappedRecords = records.map(rec => 
@@ -441,7 +443,7 @@ function buildConflictMap(records, maxDepth) {
   );
   
   function scanPath(path, values, depth) {
-    if (depth > maxDepth) return;
+    if (!isUnlimited && depth > maxDepth) return;
     
     // Check for type conflicts at this path
     const types = new Set();
@@ -465,7 +467,7 @@ function buildConflictMap(records, maxDepth) {
     
     // Recurse into objects
     const objectValues = values.filter(v => getType(v) === 'object');
-    if (objectValues.length > 0 && depth < maxDepth) {
+    if (objectValues.length > 0 && (isUnlimited || depth < maxDepth)) {
       const allKeys = new Set();
       objectValues.forEach(obj => {
         if (obj) Object.keys(obj).forEach(k => allKeys.add(k));
@@ -482,7 +484,7 @@ function buildConflictMap(records, maxDepth) {
     
     // Recurse into arrays - scan objects within arrays
     const arrayValues = values.filter(v => getType(v) === 'array');
-    if (arrayValues.length > 0 && depth < maxDepth) {
+    if (arrayValues.length > 0 && (isUnlimited || depth < maxDepth)) {
       // Collect all keys that appear in any object within any array
       const allKeysInArrays = new Set();
       values.forEach(v => {
@@ -1075,11 +1077,12 @@ function parseAndRender(text) {
   } else {
     // Build conflict map
     if (autoScanChk.checked) {
-      const maxDepth = parseInt(scanDepthSelect.value);
+      const maxDepth = scanDepthSelect.value === 'unlimited' ? Infinity : parseInt(scanDepthSelect.value);
       const result = buildConflictMap(records, maxDepth);
       conflictMap = result.conflicts;
       
-      scanStatus.textContent = `✓ Scanned ${records.length} records, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
+      const depthText = maxDepth === Infinity ? '(unlimited depth)' : `to depth ${maxDepth}`;
+      scanStatus.textContent = `✓ Scanned ${records.length} records ${depthText}, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
       scanStatus.style.color = result.totalConflicts > 0 ? '#e74c3c' : '#27ae60';
     } else {
       conflictMap = new Map();
@@ -1099,11 +1102,12 @@ function parseAndRender(text) {
 autoScanChk.onchange = () => {
   if (allRecords.length > 0) {
     if (autoScanChk.checked) {
-      const maxDepth = parseInt(scanDepthSelect.value);
+      const maxDepth = scanDepthSelect.value === 'unlimited' ? Infinity : parseInt(scanDepthSelect.value);
       const result = buildConflictMap(allRecords, maxDepth);
       conflictMap = result.conflicts;
       
-      scanStatus.textContent = `✓ Scanned ${allRecords.length} records, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
+      const depthText = maxDepth === Infinity ? '(unlimited depth)' : `to depth ${maxDepth}`;
+      scanStatus.textContent = `✓ Scanned ${allRecords.length} records ${depthText}, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
       scanStatus.style.color = result.totalConflicts > 0 ? '#e74c3c' : '#27ae60';
     } else {
       conflictMap = new Map();
@@ -1115,11 +1119,12 @@ autoScanChk.onchange = () => {
 
 scanDepthSelect.onchange = () => {
   if (autoScanChk.checked && allRecords.length > 0) {
-    const maxDepth = parseInt(scanDepthSelect.value);
+    const maxDepth = scanDepthSelect.value === 'unlimited' ? Infinity : parseInt(scanDepthSelect.value);
     const result = buildConflictMap(allRecords, maxDepth);
     conflictMap = result.conflicts;
     
-    scanStatus.textContent = `✓ Scanned ${allRecords.length} records, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
+    const depthText = maxDepth === Infinity ? '(unlimited depth)' : `to depth ${maxDepth}`;
+    scanStatus.textContent = `✓ Scanned ${allRecords.length} records ${depthText}, found ${result.totalConflicts} conflicts (${result.elapsed}s)`;
     scanStatus.style.color = result.totalConflicts > 0 ? '#e74c3c' : '#27ae60';
     renderTable();
   }
